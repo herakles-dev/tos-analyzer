@@ -4,6 +4,8 @@ AI-powered Terms of Service analyzer that transforms legal documents into clear,
 
 **Live:** [tos.herakles.dev](https://tos.herakles.dev)
 
+![FinePrint screenshot](docs/screenshot.png)
+
 ## What It Does
 
 Paste or upload any Terms of Service document and get an instant clause-by-clause risk analysis. Gemini AI categorizes every clause by severity (safe, concerning, or critical) across seven legal categories, then explains each one in plain English so you know exactly what you are agreeing to. Results include an overall risk score, key takeaways, and a public library of previously analyzed documents.
