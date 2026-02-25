@@ -159,10 +159,10 @@ export default function HomePage() {
       <div className="home-content">
         <div className="home-hero">
           <h1 className="home-hero__title">
-            Don't Sign Your Rights <span>Away</span>
+            Don&apos;t Sign Your Rights <span>Away</span>
           </h1>
           <p className="home-hero__subtitle">
-            Decode the fine print. Know what you're <span>actually</span> agreeing to.
+            Decode the fine print. Know what you&apos;re <span>actually</span> agreeing to.
           </p>
         </div>
 

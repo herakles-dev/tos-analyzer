@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         <div className="static-hero__content">
           <h1 className="static-hero__title">Privacy Policy</h1>
           <p className="static-hero__subtitle">
-            We practice what we preach—here's exactly what we do with your data
+            We practice what we preach—here&apos;s exactly what we do with your data
           </p>
         </div>
       </div>
@@ -61,7 +61,7 @@ export default function PrivacyPage() {
             <div className="static-card__icon static-card__icon--green">
               <XCircle className="w-6 h-6" />
             </div>
-            <h2 className="static-card__title">What We DON'T Collect</h2>
+            <h2 className="static-card__title">What We DON&apos;T Collect</h2>
             <div className="static-no-collect">
               <div className="static-no-item">
                 <CheckCircle className="w-5 h-5" />
@@ -121,8 +121,8 @@ export default function PrivacyPage() {
             </div>
             <h2 className="static-card__title">Third-Party Services</h2>
             <p className="static-card__text">
-              To analyze your TOS documents, we use Google's Gemini AI. When you submit text for 
-              analysis, it is sent to Google's servers for processing.
+              To analyze your TOS documents, we use Google&apos;s Gemini AI. When you submit text for
+              analysis, it is sent to Google&apos;s servers for processing.
             </p>
             <p className="static-card__text">
               Please review{' '}
@@ -132,7 +132,7 @@ export default function PrivacyPage() {
                 rel="noopener noreferrer"
                 className="static-link"
               >
-                Google's Privacy Policy <ExternalLink className="w-4 h-4 inline" />
+                Google&apos;s Privacy Policy <ExternalLink className="w-4 h-4 inline" />
               </a>{' '}
               to understand how they handle data.
             </p>

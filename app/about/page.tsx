@@ -43,7 +43,7 @@ export default function AboutPage() {
               FinePrint is an AI-powered Terms of Service analyzer that transforms dense legal 
               documents into clear, actionable insights. Our tool scans TOS agreements and 
               highlights concerning clauses, categorizing them by risk level so you know exactly 
-              what you're agreeing to.
+              what you&apos;re agreeing to.
             </p>
             <div className="static-card__badges">
               <span className="static-badge static-badge--safe">
@@ -76,7 +76,7 @@ export default function AboutPage() {
               <div className="static-step__number">2</div>
               <div className="static-step__content">
                 <h3>AI Analysis</h3>
-                <p>Google's Gemini AI reads and analyzes every clause, identifying potential risks and concerns.</p>
+                <p>Google&apos;s Gemini AI reads and analyzes every clause, identifying potential risks and concerns.</p>
               </div>
             </div>
             <div className="static-step__arrow">
@@ -99,13 +99,13 @@ export default function AboutPage() {
             </div>
             <h2 className="static-card__title">Why We Built This</h2>
             <p className="static-card__text">
-              Let's be honest: most people click "I Agree" without reading a single word. And who can 
-              blame them? The average Terms of Service is over 7,500 words—that's longer than many 
+              Let&apos;s be honest: most people click &quot;I Agree&quot; without reading a single word. And who can
+              blame them? The average Terms of Service is over 7,500 words—that&apos;s longer than many 
               short stories. Companies know this and sometimes hide concerning clauses in that wall of text.
             </p>
             <p className="static-card__text">
-              We believe transparency matters. Everyone deserves to know what rights they're giving up, 
-              what data is being collected, and what they're actually agreeing to—without needing a law 
+              We believe transparency matters. Everyone deserves to know what rights they&apos;re giving up,
+              what data is being collected, and what they&apos;re actually agreeing to—without needing a law 
               degree to understand it.
             </p>
           </div>
