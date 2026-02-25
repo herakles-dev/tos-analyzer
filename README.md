@@ -1,136 +1,78 @@
-# FinePrint - TOS Analyzer
+# FinePrint -- TOS Analyzer
 
-[![CI](https://github.com/HeraclesBass/tos-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/HeraclesBass/tos-analyzer/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Live](https://img.shields.io/badge/Live-fine--print.org-brightgreen)](https://fine-print.org)
+AI-powered Terms of Service analyzer that transforms legal documents into clear, actionable risk assessments.
 
-AI-powered Terms of Service analyzer. Paste or upload any legal document, get a plain-language risk analysis with severity scores, clause-by-clause breakdown, and actionable takeaways.
+**Live:** [tos.herakles.dev](https://tos.herakles.dev)
 
-**Live at [fine-print.org](https://fine-print.org)**
+## What It Does
 
-## Features
-
-- **Gemini 2.5 Pro Analysis**: Clause-by-clause risk assessment across 7 categories (Privacy, Liability, Rights, Changes, Termination, Payment, AI & Data Use)
-- **Company Auto-Detection**: Identifies the company from document content with confidence scoring
-- **Document Validation**: Rejects non-legal content before wasting API calls
-- **Smart Caching**: Redis + PostgreSQL deduplication via SHA-256 hashing
-- **PDF Upload**: Extract and analyze PDF documents
-- **Public Library**: Community collection of analyzed TOS documents
-- **Shareable Links**: Share analysis results with view tracking
-- **Rate Limiting**: Nginx + Redis dual-layer protection with atomic Lua scripts
-- **Budget Protection**: Daily Gemini token cap prevents runaway costs
+Paste or upload any Terms of Service document and get an instant clause-by-clause risk analysis. Gemini AI categorizes every clause by severity (safe, concerning, or critical) across seven legal categories, then explains each one in plain English so you know exactly what you are agreeing to. Results include an overall risk score, key takeaways, and a public library of previously analyzed documents.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Framework** | Next.js 14 (App Router) |
-| **Language** | TypeScript |
-| **AI** | Google Gemini 2.5 Pro |
-| **Database** | PostgreSQL (Prisma ORM) |
-| **Cache** | Redis (ioredis) |
-| **Validation** | Zod |
-| **PDF** | pdf-parse |
-| **Deployment** | Docker Compose |
+Next.js 14, TypeScript, Google Gemini 2.5 Pro, PostgreSQL (Prisma ORM), Redis (rate limiting + caching), Tailwind CSS, Zod
 
-## Quick Start
+## Architecture
 
-### Docker (Recommended)
+```
+Browser --> Next.js API Routes --> Gemini AI --> PostgreSQL
+                                |
+                            Redis Cache
+                       (dedup + rate limit)
+```
+
+Incoming text is normalized and SHA-256 hashed before hitting the AI. If the hash already exists in Redis or Postgres, the cached analysis is returned immediately -- no redundant API calls. Rate limiting uses atomic Lua scripts in Redis with a fail-closed policy: if Redis goes down, requests are blocked rather than allowed through. A daily token budget cap prevents runaway Gemini costs.
+
+## Key Implementation Details
+
+- **Content deduplication** -- SHA-256 hash of normalized text prevents redundant API calls
+- **Fail-closed rate limiting** -- Atomic Lua scripts in Redis; blocks requests if Redis is down
+- **Budget tracking** -- Daily token consumption limits to prevent runaway API costs
+- **Prompt injection defense** -- Gemini systemInstruction API separates system prompt from user content; post-processing verifies all quoted text exists in the source document
+- **7 risk categories** -- Privacy, Liability, Rights, Changes, Termination, Payment, AI & Data Use
+- **Document validation** -- Rejects non-legal content before consuming API tokens
+
+## Running Locally
 
 ```bash
-cp .env.example .env
-# Edit .env with your Gemini API key and database credentials
-
-docker compose up -d
+git clone https://github.com/HeraclesBass/tos-analyzer.git
+cd tos-analyzer
+cp .env.example .env  # Add your Gemini API key, DATABASE_URL, REDIS_URL
+npm install
+npx prisma generate && npx prisma db push
+npm run dev
 ```
 
-The app will be available at `http://localhost:3000`.
+Requires: Node.js 18+, PostgreSQL, Redis
 
-### API Endpoints
+## Tests
 
-#### Analyze TOS
-```
-POST /api/analyze
-Content-Type: application/json
-
-{
-  "text": "Terms of Service content...",
-  "source_type": "paste",
-  "company_name": "Acme Corp",
-  "add_to_library": false
-}
-
-Response: {
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "analysis": { summary, categories, detected_company, document_validation },
-    "creator_token": "hex-string",
-    "is_public": false
-  }
-}
+```bash
+npm test           # 3 suites (API, Redis, utils)
+npm run lint       # ESLint
 ```
 
-The `creator_token` is returned once at creation. Save it to publish the analysis later.
+## Project Structure
 
-#### Publish to Library
 ```
-POST /api/analysis/{id}/publish
-Content-Type: application/json
-
-{
-  "company_name": "Acme Corp",
-  "add_to_library": true,
-  "creator_token": "hex-string-from-creation"
-}
+app/
+  api/
+    analyze/       Main analysis endpoint
+    health/        Health check (DB + Redis + Gemini)
+    library/       Public analysis library
+    export/        PDF/JSON export
+    upload/        PDF upload
+    analysis/      View/publish shared analyses
+  page.tsx         Upload interface
+  library/         Browse published analyses
+lib/
+  utils.ts         Content hashing, validation, sanitization
+  redis.ts         Cache, rate limiting, budget tracking
+  services/
+    gemini-analyzer.ts  AI analysis with structured output
+components/        Risk badges, TOS cards, floating logos
+__tests__/         Jest test suites
 ```
-
-#### Other Endpoints
-```
-GET  /api/analysis/{id}       # View shared analysis
-GET  /api/library              # Browse public library (?search=&sort=&filter=&limit=)
-GET  /api/export/{id}          # Export analysis data
-POST /api/upload               # Upload PDF (multipart/form-data)
-GET  /api/health               # Health check
-```
-
-## Security
-
-- **Prompt injection defense**: Gemini `systemInstruction` API separates system prompt from user content; XML document delimiters; post-processing quote verification
-- **Rate limiting**: Nginx zones (analyze 5r/m, upload 3r/m, read 30r/m) + Redis per-IP limits with atomic Lua scripts
-- **Budget cap**: Daily token limit (default 5M) prevents cost abuse
-- **Ownership model**: Creator token (HMAC-SHA256) required to publish analyses
-- **Input sanitization**: Zod schemas, HTML stripping on company names, safe-char allowlist
-- **Privacy by default**: `isPublic` defaults to `false`; analyses are private unless explicitly published
-- **Infrastructure**: Docker port binding on 127.0.0.1, .env at mode 600, no exposed database ports
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | Yes | - | Google Gemini API key |
-| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
-| `REDIS_URL` | Yes | - | Redis connection string |
-| `SESSION_SALT` | Yes | - | HMAC salt for tokens and session hashing |
-| `DAILY_TOKEN_BUDGET` | No | `5000000` | Max Gemini tokens per day (~$10-15) |
-| `RATE_LIMIT_PER_MINUTE` | No | `10` | Write endpoint rate limit |
-| `PORT` | No | `3000` | Server port |
-| `NODE_ENV` | No | `production` | Environment |
-
-## Database Schema
-
-- **analyses**: TOS analysis results with 30-day retention, ownership tokens
-- **shares**: Shareable link views and metadata
-- **analytics_events**: Privacy-focused event tracking (no PII)
-- **daily_summaries**: Aggregated usage statistics
-
-## Constraints
-
-- Maximum text length: 500,000 characters / 50,000 words
-- Maximum file upload: 10MB (PDF only)
-- Analysis retention: 30 days
-- Cache TTL: 7 days (analysis), 30 days (shares)
-- Daily token budget: 5M tokens (configurable)
 
 ## License
 
