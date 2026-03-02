@@ -2,7 +2,7 @@
 
 AI-powered Terms of Service analyzer that transforms legal documents into clear, actionable risk assessments.
 
-**Live:** [tos.herakles.dev](https://tos.herakles.dev)
+**Live:** [fine-print.org](https://fine-print.org)
 
 ![FinePrint screenshot](docs/screenshot.png)
 
