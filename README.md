@@ -12,7 +12,7 @@ Paste or upload any Terms of Service document and get an instant clause-by-claus
 
 ## Tech Stack
 
-Next.js 14, TypeScript, Google Gemini 2.5 Pro, PostgreSQL (Prisma ORM), Redis (rate limiting + caching), Tailwind CSS, Zod
+Next.js, TypeScript, Google Gemini 3.1 Pro, PostgreSQL (Prisma ORM), Redis (rate limiting + caching), Tailwind CSS, Zod
 
 ## Architecture
 
