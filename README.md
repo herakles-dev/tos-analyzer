@@ -37,7 +37,7 @@ Incoming text is normalized and SHA-256 hashed before hitting the AI. If the has
 ## Running Locally
 
 ```bash
-git clone https://github.com/HeraclesBass/tos-analyzer.git
+git clone https://github.com/herakles-dev/tos-analyzer.git
 cd tos-analyzer
 cp .env.example .env  # Add your Gemini API key, DATABASE_URL, REDIS_URL
 npm install
