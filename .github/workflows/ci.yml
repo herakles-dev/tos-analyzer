@@ -88,7 +88,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/tos_analyzer_test
           REDIS_URL: redis://localhost:6379
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Test-only placeholders — never hit real Gemini in CI.
+          GEMINI_API_KEY: ci-test-key-not-used
+          SESSION_SALT: ci-test-session-salt-placeholder-32chars
           NEXTAUTH_SECRET: test-secret
         run: npm test
 
