@@ -151,8 +151,9 @@ export default function PrivacyPage() {
             <h2 className="static-card__title">Community Library</h2>
             <ul className="static-list static-list--spaced">
               <li>
-                <strong>Public by Choice:</strong> Sharing to the library is optional and opt-in. 
-                By default, analyses can be shared unless you toggle the option off.
+                <strong>Public by Choice:</strong> Sharing to the library is opt-in.
+                Each analysis is private by default — you must explicitly toggle &ldquo;Share with Community&rdquo; on
+                before clicking Analyze.
               </li>
               <li>
                 <strong>Permanent Records:</strong> Once shared, analyses become part of our public 
@@ -196,7 +197,7 @@ export default function PrivacyPage() {
               this page with an updated revision date.
             </p>
             <p className="static-card__meta">
-              Last updated: December 2025
+              Last updated: April 2026
             </p>
           </div>
         </section>

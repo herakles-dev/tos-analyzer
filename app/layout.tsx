@@ -14,11 +14,15 @@ export const metadata: Metadata = {
     siteName: 'FinePrint',
     type: 'website',
     locale: 'en_US',
+    images: [
+      { url: '/og-image.png', width: 1280, height: 800, alt: 'FinePrint — AI-powered Terms of Service analyzer' },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'FinePrint - Know what you\'re agreeing to',
     description: 'Decode the fine print. AI-powered TOS analysis that reveals what you\'re actually agreeing to.',
+    images: ['/og-image.png'],
   },
   metadataBase: new URL('https://fine-print.org'),
 };
@@ -36,8 +40,11 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
       </head>
       <body>
-        {children}
-        <Toaster 
+        <a href="#main-content" className="skip-to-content">Skip to main content</a>
+        <div id="main-content">
+          {children}
+        </div>
+        <Toaster
           position="bottom-right"
           toastOptions={{
             duration: 3000,

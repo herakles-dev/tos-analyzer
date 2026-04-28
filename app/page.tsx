@@ -14,7 +14,7 @@ export default function HomePage() {
   const [tosText, setTosText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [addToLibrary, setAddToLibrary] = useState(false);
+  const [shareWithLibrary, setShareWithLibrary] = useState(false);
   const [companies, setCompanies] = useState<(string | null)[]>([]);
 
   useEffect(() => {
@@ -98,7 +98,7 @@ export default function HomePage() {
         body: JSON.stringify({
           text: tosText,
           source_type: 'paste',
-          add_to_library: !addToLibrary,
+          add_to_library: shareWithLibrary,
         }),
       });
 
@@ -198,6 +198,10 @@ export default function HomePage() {
               </>
             )}
           </button>
+          <p className="home-disclaimer">
+            Informational only. Not legal advice. Your text is sent to Google Gemini AI for analysis.{' '}
+            <Link href="/privacy" className="home-disclaimer__link">Privacy</Link>
+          </p>
 
           {analyzing && (
             <div className="home-progress">
@@ -263,8 +267,8 @@ export default function HomePage() {
               <label className="home-toggle">
                 <input
                   type="checkbox"
-                  checked={!addToLibrary}
-                  onChange={(e) => setAddToLibrary(!e.target.checked)}
+                  checked={shareWithLibrary}
+                  onChange={(e) => setShareWithLibrary(e.target.checked)}
                   disabled={analyzing}
                 />
                 <span className="home-toggle__slider"></span>
