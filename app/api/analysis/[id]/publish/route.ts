@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { formatError, getClientIP, sanitizeCompanyName } from '@/lib/utils';
+import { formatError, getClientIP, rateLimitKey, sanitizeCompanyName, logErrorSafely } from '@/lib/utils';
 import { invalidateCache, CACHE_KEYS, checkRateLimit } from '@/lib/redis';
 
 export async function POST(
@@ -19,7 +19,7 @@ export async function POST(
   try {
     // Rate limit write endpoints (10/min per IP)
     const clientIP = getClientIP(request.headers);
-    if (await checkRateLimit(clientIP)) {
+    if (await checkRateLimit(rateLimitKey(clientIP))) {
       return NextResponse.json(
         formatError('Rate limit exceeded. Please try again later.', 'RATE_LIMIT_EXCEEDED'),
         { status: 429 }
@@ -95,11 +95,49 @@ export async function POST(
       .update(creator_token)
       .digest('hex');
 
-    if (submittedHash !== (analysis as any).creatorTokenHash) {
+    // Constant-time compare. The token is 256-bit random hex so brute-force
+    // is infeasible regardless, but timing-safe is the right primitive here
+    // and prevents future-proofing concerns with shorter-token migrations.
+    const storedHash = (analysis as any).creatorTokenHash as string;
+    const submittedBuf = Buffer.from(submittedHash, 'hex');
+    const storedBuf = Buffer.from(storedHash, 'hex');
+    if (
+      submittedBuf.length !== storedBuf.length ||
+      !crypto.timingSafeEqual(submittedBuf, storedBuf)
+    ) {
       return NextResponse.json(
         formatError('Invalid creator token', 'UNAUTHORIZED'),
         { status: 401 }
       );
+    }
+
+    // Quality gate: block library publishing for intro/stub pages or analyses with too few clauses.
+    // Users can still keep the analysis private (add_to_library === false) — only public publishing is gated.
+    if (add_to_library === true) {
+      const data = analysis.analysisData as any;
+      const isCompleteDocument = data?.document_validation?.is_complete_document !== false;
+      const totalClauses = data?.summary?.total_clauses ?? 0;
+      const isSubstantive = totalClauses >= 3;
+
+      if (!isCompleteDocument || !isSubstantive) {
+        const reason = !isCompleteDocument
+          ? (data?.document_validation?.rejection_reason
+              || "This appears to be an introductory or stub page rather than the full Terms of Service.")
+          : `Only ${totalClauses} substantive clause${totalClauses === 1 ? '' : 's'} were found. The library accepts only complete documents.`;
+
+        return NextResponse.json(
+          {
+            error: `Cannot publish to library: ${reason} For best results, paste the complete legal document and re-analyze.`,
+            code: 'INCOMPLETE_DOCUMENT',
+            metadata: {
+              is_complete_document: isCompleteDocument,
+              total_clauses: totalClauses,
+              issues: data?.document_validation?.content_issues || [],
+            },
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // Update analysis to be public
@@ -138,13 +176,11 @@ export async function POST(
     });
 
   } catch (error) {
-    console.error('Publish error:', error);
-
+    logErrorSafely('publish.POST', error);
+    const isDev = process.env.NODE_ENV === 'development';
     return NextResponse.json(
       formatError(
-        error instanceof Error && process.env.NODE_ENV !== 'production'
-          ? error.message
-          : 'Failed to publish analysis',
+        isDev && error instanceof Error ? error.message : 'Failed to publish analysis',
         'PUBLISH_ERROR'
       ),
       { status: 500 }

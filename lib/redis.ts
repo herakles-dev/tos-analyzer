@@ -36,11 +36,18 @@ redis.on('connect', () => {
 export const CACHE_KEYS = {
   ANALYSIS: 'tos:analysis:',
   SHARE: 'tos:share:',
-  RATE_LIMIT: 'ratelimit:ip:',
-  RATE_LIMIT_READ: 'ratelimit:read:ip:',
+  RATE_LIMIT: 'ratelimit:ip:',                  // analyze + publish writes
+  RATE_LIMIT_READ: 'ratelimit:read:ip:',        // library, share, export reads
+  RATE_LIMIT_UPLOAD: 'ratelimit:upload:ip:',    // PDF upload — separate namespace
+                                                 // so 3 uploads don't eat into
+                                                 // the analyze write quota
   SESSION: 'session:',
   DAILY_TOKENS: 'budget:daily_tokens:',
   DAILY_REQUESTS: 'budget:daily_requests:',
+  // Per-minute global token bucket: protects against distributed attackers
+  // that bypass per-IP rate limits (e.g. botnets, IPv6 prefix rotation).
+  // Key suffix is YYYY-MM-DDTHH:MM (UTC).
+  MINUTE_TOKENS: 'budget:minute_tokens:',
 };
 
 // Cache TTLs (in seconds)
@@ -152,13 +159,29 @@ export async function checkReadRateLimit(ip: string, limit: number = 30): Promis
 }
 
 /**
- * Daily token budget tracking
- * Tracks total Gemini API tokens consumed today
- * Returns true if budget is EXCEEDED
+ * Dedicated rate limit for the PDF upload endpoint. Uses its own Redis key
+ * namespace so a user's upload activity doesn't consume their analyze quota
+ * (and vice-versa). Defaults to 3/min to match the nginx-level cap.
+ */
+export async function checkUploadRateLimit(ip: string, limit: number = 3): Promise<boolean> {
+  try {
+    const key = `${CACHE_KEYS.RATE_LIMIT_UPLOAD}${ip}`;
+    const count = await atomicRateLimit(key, CACHE_TTL.RATE_LIMIT);
+    return count > limit;
+  } catch (error) {
+    console.error('Redis upload rate limit error:', error);
+    return true; // FAIL CLOSED
+  }
+}
+
+/**
+ * Daily token budget tracking (legacy — kept for read-only stats endpoints).
+ * For the request flow, use reserveDailyBudget() instead, which atomically
+ * checks-and-increments and prevents the surge-overshoot race.
  */
 export async function checkDailyBudget(tokensToAdd: number = 0): Promise<{ exceeded: boolean; used: number; limit: number }> {
-  const limit = parseInt(process.env.DAILY_TOKEN_BUDGET || '5000000'); // 5M tokens/day default
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const limit = parseInt(process.env.DAILY_TOKEN_BUDGET || '5000000');
+  const today = new Date().toISOString().split('T')[0];
   const tokenKey = `${CACHE_KEYS.DAILY_TOKENS}${today}`;
   const requestKey = `${CACHE_KEYS.DAILY_REQUESTS}${today}`;
 
@@ -167,7 +190,6 @@ export async function checkDailyBudget(tokensToAdd: number = 0): Promise<{ excee
     if (tokensToAdd > 0) {
       used = await redis.incrby(tokenKey, tokensToAdd);
       await redis.incr(requestKey);
-      // Set TTL to expire at end of day (max 48h to be safe)
       await redis.expire(tokenKey, 48 * 60 * 60);
       await redis.expire(requestKey, 48 * 60 * 60);
     } else {
@@ -177,8 +199,301 @@ export async function checkDailyBudget(tokensToAdd: number = 0): Promise<{ excee
     return { exceeded: used > limit, used, limit };
   } catch (error) {
     console.error('Redis budget check error:', error);
-    // FAIL CLOSED on budget check too — don't allow unbounded spend
     return { exceeded: true, used: 0, limit };
+  }
+}
+
+/**
+ * Atomically reserve `estimate` tokens against the daily budget.
+ *
+ * Closes the surge-overshoot race in checkDailyBudget(): the old code did
+ * "read used; if used+new <= limit, INCRBY new". Two concurrent requests
+ * could both pass the read-side check and both INCRBY, blowing through
+ * the cap. This script does the check-and-increment atomically — the budget
+ * cap is now mathematically authoritative.
+ *
+ * Returns:
+ *   { ok: true,  used }  — reserved successfully (caller must commit/refund)
+ *   { ok: false, used }  — would exceed limit; not reserved
+ *
+ * Pair every successful reserve with exactly one of:
+ *   - commitTokenUsage(estimate, actual)  on success
+ *   - refundDailyBudget(estimate)         on failure
+ */
+export async function reserveDailyBudget(
+  estimate: number
+): Promise<{ ok: boolean; used: number; limit: number }> {
+  const limit = parseInt(process.env.DAILY_TOKEN_BUDGET || '5000000');
+  const today = new Date().toISOString().split('T')[0];
+  const tokenKey = `${CACHE_KEYS.DAILY_TOKENS}${today}`;
+  const requestKey = `${CACHE_KEYS.DAILY_REQUESTS}${today}`;
+  const ttl = 48 * 60 * 60;
+
+  if (estimate <= 0) {
+    return { ok: true, used: 0, limit };
+  }
+
+  const script = `
+    local current = tonumber(redis.call('GET', KEYS[1])) or 0
+    local cap = tonumber(ARGV[2])
+    local add = tonumber(ARGV[1])
+    if (current + add) > cap then
+      return {0, current}
+    end
+    local newval = redis.call('INCRBY', KEYS[1], add)
+    redis.call('EXPIRE', KEYS[1], ARGV[3])
+    redis.call('INCR', KEYS[2])
+    redis.call('EXPIRE', KEYS[2], ARGV[3])
+    return {1, newval}
+  `;
+
+  try {
+    const result = (await redis.eval(
+      script, 2, tokenKey, requestKey,
+      estimate.toString(), limit.toString(), ttl.toString()
+    )) as [number, number];
+    return { ok: result[0] === 1, used: result[1], limit };
+  } catch (error) {
+    console.error('Redis budget reserve error:', error);
+    // FAIL CLOSED — never let a Redis outage uncap spending.
+    return { ok: false, used: 0, limit };
+  }
+}
+
+/**
+ * Refund unused tokens to the daily budget. Clamped at zero. Uses SET KEEPTTL
+ * so we don't extend the day-rollover boundary by re-issuing a fresh 48h TTL
+ * on every refund.
+ */
+export async function refundDailyBudget(tokens: number): Promise<void> {
+  if (tokens <= 0) return;
+  const today = new Date().toISOString().split('T')[0];
+  const tokenKey = `${CACHE_KEYS.DAILY_TOKENS}${today}`;
+  // SET ... KEEPTTL preserves the existing TTL — Redis 6.0+ (we run 7-alpine).
+  // If the key has no TTL (shouldn't happen), SETEX it with the standard TTL.
+  const script = `
+    local current = tonumber(redis.call('GET', KEYS[1])) or 0
+    local refund = tonumber(ARGV[1])
+    local newval = current - refund
+    if newval < 0 then newval = 0 end
+    local ttl = redis.call('TTL', KEYS[1])
+    if ttl > 0 then
+      redis.call('SET', KEYS[1], newval, 'KEEPTTL')
+    else
+      redis.call('SET', KEYS[1], newval, 'EX', ARGV[2])
+    end
+    return newval
+  `;
+  try {
+    await redis.eval(script, 1, tokenKey, tokens.toString(), (48 * 60 * 60).toString());
+  } catch (error) {
+    console.error('Redis budget refund error:', error);
+  }
+}
+
+/**
+ * Refund tokens to the per-minute global bucket (e.g. on Gemini failure or
+ * Redis-cache hit, where the LLM was not actually called).
+ * Without this, a single failed analysis exhausts the 90s bucket window
+ * for all users system-wide — exploitable as a service-wide DoS.
+ */
+export async function refundMinuteBucket(tokens: number): Promise<void> {
+  if (tokens <= 0) return;
+  const minute = new Date().toISOString().slice(0, 16);
+  const key = `${CACHE_KEYS.MINUTE_TOKENS}${minute}`;
+  const script = `
+    local current = tonumber(redis.call('GET', KEYS[1])) or 0
+    local refund = tonumber(ARGV[1])
+    local newval = current - refund
+    if newval < 0 then newval = 0 end
+    local ttl = redis.call('TTL', KEYS[1])
+    if ttl > 0 then
+      redis.call('SET', KEYS[1], newval, 'KEEPTTL')
+    else
+      redis.call('SET', KEYS[1], newval, 'EX', '90')
+    end
+    return newval
+  `;
+  try {
+    await redis.eval(script, 1, key, tokens.toString());
+  } catch (error) {
+    console.error('Redis minute-bucket refund error:', error);
+  }
+}
+
+/**
+ * Commit actual token usage after a successful Gemini call.
+ * Reconciles `estimate` (already reserved) with `actual`:
+ *   actual > estimate → atomic check-and-INCRBY against limit (matches reserve)
+ *   actual < estimate → refund the unused portion
+ *
+ * The positive-delta path MUST be atomic, otherwise concurrent commits
+ * re-open the surge-overshoot race that reserveDailyBudget closed.
+ */
+export async function commitTokenUsage(estimate: number, actual: number): Promise<void> {
+  const delta = actual - estimate;
+  if (delta === 0) return;
+  if (delta < 0) {
+    await refundDailyBudget(-delta);
+    return;
+  }
+
+  // delta > 0 — actual exceeded estimate. Atomic check-and-increment so we
+  // never push past the daily cap even under concurrency.
+  const limit = parseInt(process.env.DAILY_TOKEN_BUDGET || '5000000');
+  const today = new Date().toISOString().split('T')[0];
+  const tokenKey = `${CACHE_KEYS.DAILY_TOKENS}${today}`;
+  // Atomic: check current + delta vs cap, INCRBY by min(delta, cap - current).
+  // Always commit at least *some* amount even if we're already over (caller
+  // already paid for these tokens in real life — not committing them
+  // under-reports actual spend).
+  const script = `
+    local current = tonumber(redis.call('GET', KEYS[1])) or 0
+    local cap = tonumber(ARGV[2])
+    local add = tonumber(ARGV[1])
+    local headroom = cap - current
+    local toAdd = add
+    if toAdd > headroom then
+      if headroom > 0 then toAdd = headroom else toAdd = 0 end
+    end
+    if toAdd > 0 then
+      redis.call('INCRBY', KEYS[1], toAdd)
+      redis.call('EXPIRE', KEYS[1], ARGV[3])
+    end
+    return toAdd
+  `;
+  try {
+    await redis.eval(
+      script, 1, tokenKey,
+      delta.toString(), limit.toString(), (48 * 60 * 60).toString()
+    );
+  } catch (error) {
+    console.error('Redis commit token usage error:', error);
+  }
+}
+
+/**
+ * Lock TTL must exceed `maxDuration` on the analyze route (300s) plus a
+ * small safety margin, otherwise a long Gemini call can let the lock expire
+ * mid-flight, allowing a second concurrent request to also call Gemini.
+ */
+export const CONTENT_LOCK_TTL_SECONDS = 310;
+
+/**
+ * Acquire a short-lived lock keyed on contentHash so two concurrent requests
+ * with the same input don't both miss the cache and both call Gemini.
+ * Returns the lock token on success, null if another request holds it.
+ *
+ * Pair every successful acquire() with a release() in a finally — otherwise
+ * the lock pins the slot for the full TTL.
+ */
+export async function acquireContentLock(
+  contentHash: string,
+  ttlSeconds: number = CONTENT_LOCK_TTL_SECONDS
+): Promise<string | null> {
+  // The token is a per-call random hex so release() can verify it owns the
+  // lock and won't release a lock another request renewed.
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const key = `lock:content:${contentHash}`;
+  try {
+    const result = await redis.set(key, token, 'EX', ttlSeconds, 'NX');
+    return result === 'OK' ? token : null;
+  } catch (error) {
+    console.error('Redis lock acquire error:', error);
+    // Fail-open on lock acquisition: if Redis is down we don't want to block
+    // legitimate requests. Worst case a duplicate Gemini call happens, which
+    // is bounded by the budget pre-reservation.
+    return token;
+  }
+}
+
+export async function releaseContentLock(contentHash: string, token: string): Promise<void> {
+  if (!token) return;
+  const key = `lock:content:${contentHash}`;
+  // Only delete if we still own it (token matches). Avoids releasing a lock
+  // that was acquired by a later request after our TTL expired.
+  const script = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      return redis.call('DEL', KEYS[1])
+    else
+      return 0
+    end
+  `;
+  try {
+    await redis.eval(script, 1, key, token);
+  } catch (error) {
+    console.error('Redis lock release error:', error);
+  }
+}
+
+/**
+ * Debounce per-(session, target) actions. Returns true if this is the first
+ * occurrence within the window, false if it's a duplicate. Used to prevent
+ * library-popularity inflation via repeated GETs of /api/analysis/[id].
+ */
+export async function debounceAction(
+  bucket: string, sessionHash: string, targetId: string, ttlSeconds: number = 24 * 60 * 60
+): Promise<boolean> {
+  if (!sessionHash || !targetId) return true;
+  const key = `debounce:${bucket}:${sessionHash}:${targetId}`;
+  try {
+    // SET NX returns 'OK' on first set, null on duplicate.
+    const result = await redis.set(key, '1', 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  } catch (error) {
+    console.error('Redis debounce error:', error);
+    // Fail-open: a Redis hiccup shouldn't suppress legitimate views.
+    return true;
+  }
+}
+
+/**
+ * Per-minute global token bucket. Independent of per-IP limits; protects
+ * against distributed attacks (botnets, IPv6 prefix rotation) that bypass
+ * IP-based rate limits. Default 100k tokens/min.
+ *
+ * Atomically reserves `estimate` against the current minute's bucket.
+ * Returns ok:false without reserving if it would exceed.
+ */
+export async function checkGlobalTokenBucket(
+  estimate: number
+): Promise<{ ok: boolean; used: number; limit: number }> {
+  // Default 1M tokens/min — sized so legitimate concurrency (~10 simultaneous
+  // 5k-word TOS users at ~15k tokens each = 150k/min) leaves headroom while
+  // still capping bot/distributed abuse to a sustainable rate. Tune via env
+  // once we have measured production traffic.
+  const limit = parseInt(process.env.MINUTE_TOKEN_BUDGET || '1000000');
+  // Bucket key includes minute granularity (UTC). 90s TTL is a safety margin
+  // so a key SET at second :59 doesn't expire before that minute is fully
+  // accounted for. Two adjacent minute keys can coexist briefly; requests
+  // are partitioned to the current minute so no double-counting occurs.
+  const minute = new Date().toISOString().slice(0, 16);
+  const key = `${CACHE_KEYS.MINUTE_TOKENS}${minute}`;
+  const ttl = 90; // covers the minute + a little overlap
+
+  if (estimate <= 0) {
+    return { ok: true, used: 0, limit };
+  }
+
+  const script = `
+    local current = tonumber(redis.call('GET', KEYS[1])) or 0
+    local cap = tonumber(ARGV[2])
+    local add = tonumber(ARGV[1])
+    if (current + add) > cap then
+      return {0, current}
+    end
+    local newval = redis.call('INCRBY', KEYS[1], add)
+    redis.call('EXPIRE', KEYS[1], ARGV[3])
+    return {1, newval}
+  `;
+  try {
+    const result = (await redis.eval(
+      script, 1, key, estimate.toString(), limit.toString(), ttl.toString()
+    )) as [number, number];
+    return { ok: result[0] === 1, used: result[1], limit };
+  } catch (error) {
+    console.error('Redis minute bucket error:', error);
+    return { ok: false, used: 0, limit };
   }
 }
 
@@ -266,15 +581,16 @@ export async function invalidateCache(keyOrPattern: string): Promise<void> {
 }
 
 /**
- * Get rate limit info for response headers
+ * Get rate limit info for response headers. `keyPrefix` lets each endpoint
+ * read its own counter (analyze: RATE_LIMIT, upload: RATE_LIMIT_UPLOAD, etc.).
  */
-export async function getRateLimitInfo(ip: string, limit: number = 10): Promise<{
-  limit: number;
-  remaining: number;
-  reset: number;
-}> {
+export async function getRateLimitInfo(
+  ip: string,
+  limit: number = 10,
+  keyPrefix: string = CACHE_KEYS.RATE_LIMIT
+): Promise<{ limit: number; remaining: number; reset: number }> {
   try {
-    const key = `${CACHE_KEYS.RATE_LIMIT}${ip}`;
+    const key = `${keyPrefix}${ip}`;
     const [count, ttl] = await Promise.all([
       redis.get(key),
       redis.ttl(key),

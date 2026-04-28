@@ -249,6 +249,180 @@ html {
   color: #ffffff;
 }
 
+/* Age + Superseded Warnings */
+.tos-card__warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tos-card__age {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.tos-card__age--stale {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.tos-card__age--very-stale {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.tos-card__age--superseded {
+  background: rgba(249, 115, 22, 0.12);
+  color: #fb923c;
+  border-color: rgba(249, 115, 22, 0.3);
+}
+
+/* Age banner on /analysis/[id] viewer */
+.analysis-age-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+}
+
+.analysis-age-banner--stale {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.analysis-age-banner--very-stale {
+  background: rgba(239, 68, 68, 0.1);
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.analysis-age-banner strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Incomplete-document warning banner on /analysis/[id] viewer */
+.analysis-incomplete-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  margin-bottom: 20px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.analysis-incomplete-banner svg {
+  color: #fbbf24;
+  margin-top: 2px;
+}
+
+.analysis-incomplete-banner strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.analysis-incomplete-banner__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.analysis-incomplete-banner__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fcd34d;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.analysis-incomplete-banner__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #fcd34d;
+  opacity: 0.85;
+}
+
+/* AI-generated disclaimer — shown above every analysis */
+.analysis-ai-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin: 0 0 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #c7d2fe;
+}
+
+.analysis-ai-disclaimer__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(99, 102, 241, 0.25);
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #e0e7ff;
+  text-transform: uppercase;
+}
+
+.analysis-ai-disclaimer__text {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* AI badge on library cards */
+.tos-card__ai-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #c7d2fe;
+  text-transform: uppercase;
+}
+
 /* Category Tags */
 .tos-card__tag {
   display: inline-flex;

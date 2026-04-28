@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { FileText, Search, X, Sparkles, TrendingUp, Clock, AlertTriangle, Shield, Database, Building2, Zap } from 'lucide-react';
+import { FileText, Search, X, Sparkles, TrendingUp, Clock, AlertTriangle, Shield, Database, Building2, Zap, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { TOSCard } from '@/components/TOSCard';
@@ -17,6 +17,8 @@ interface LibraryAnalysis {
   categories: CategoryName[];
   createdAt: string;
   score: number;
+  isSuperseded?: boolean;
+  latestId?: string | null;
 }
 
 interface LibraryResponse {
@@ -24,6 +26,7 @@ interface LibraryResponse {
   data: {
     analyses: LibraryAnalysis[];
     total: number;
+    uniqueCompanyCount: number;
     hasMore: boolean;
   };
 }
@@ -31,6 +34,7 @@ interface LibraryResponse {
 export default function LibraryPage() {
   const [analyses, setAnalyses] = useState<LibraryAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('popular');
   const [filter, setFilter] = useState('all');
@@ -38,32 +42,31 @@ export default function LibraryPage() {
   const [hasMore, setHasMore] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [companyCount, setCompanyCount] = useState(0);
 
   const fetchLibrary = useCallback(async () => {
     setLoading(true);
     setSearchLoading(true);
+    setError(null);
     try {
-      const params = new URLSearchParams({
-        sort,
-        filter,
-        limit: '50'
-      });
-      
+      const params = new URLSearchParams({ sort, filter, limit: '50' });
       if (search) params.append('search', search);
       if (category) params.append('category', category);
 
       const response = await fetch(`/api/library?${params}`);
-      
       if (!response.ok) {
-        throw new Error('Failed to fetch library');
+        throw new Error(`Failed to fetch library (${response.status})`);
       }
 
       const result: LibraryResponse = await response.json();
       setAnalyses(result.data.analyses);
       setHasMore(result.data.hasMore);
       setTotalCount(result.data.total);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to load library');
+      setCompanyCount(result.data.uniqueCompanyCount);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to load library';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
       setSearchLoading(false);
@@ -88,11 +91,7 @@ export default function LibraryPage() {
     setCategory('');
   };
 
-  const activeFilterCount = [
-    filter !== 'all',
-    category !== '',
-    search !== ''
-  ].filter(Boolean).length;
+  const activeFilterCount = [filter !== 'all', category !== '', search !== ''].filter(Boolean).length;
 
   const loadMore = async () => {
     try {
@@ -100,23 +99,21 @@ export default function LibraryPage() {
         sort,
         filter,
         limit: '50',
-        offset: analyses.length.toString()
+        offset: analyses.length.toString(),
       });
-      
       if (search) params.append('search', search);
       if (category) params.append('category', category);
 
       const response = await fetch(`/api/library?${params}`);
+      if (!response.ok) throw new Error(`Failed to load more (${response.status})`);
       const result: LibraryResponse = await response.json();
-      
+
       setAnalyses([...analyses, ...result.data.analyses]);
       setHasMore(result.data.hasMore);
-    } catch (error) {
-      toast.error('Failed to load more');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load more');
     }
   };
-
-  const uniqueCompanies = new Set(analyses.map(a => a.companyName).filter(Boolean)).size;
 
   return (
     <main className="library-page">
@@ -138,16 +135,21 @@ export default function LibraryPage() {
       <div className="library-hero">
         <div className="library-hero__glow library-hero__glow--1" />
         <div className="library-hero__glow library-hero__glow--2" />
-        
+
         <FloatingLogos companies={analyses.map(a => a.companyName)} />
-        
+
         <div className="library-hero__content">
-          <h1 className="library-hero__title">
-            TOS Library
-          </h1>
-          
+          <h1 className="library-hero__title">TOS Library</h1>
+
           <p className="library-hero__subtitle">
-            AI-powered analysis of Terms of Service from <span className="library-hero__highlight">{uniqueCompanies || 150}+ companies</span>
+            {companyCount > 0 ? (
+              <>
+                AI-powered analysis of Terms of Service from{' '}
+                <span className="library-hero__highlight">{companyCount} {companyCount === 1 ? 'company' : 'companies'}</span>
+              </>
+            ) : (
+              <>AI-powered analysis of Terms of Service in plain English</>
+            )}
           </p>
 
           <div className="library-stats">
@@ -166,7 +168,7 @@ export default function LibraryPage() {
                 <Building2 className="w-5 h-5" />
               </div>
               <div className="library-stat__info">
-                <div className="library-stat__value">{uniqueCompanies || 150}</div>
+                <div className="library-stat__value">{companyCount.toLocaleString()}</div>
                 <div className="library-stat__label">Companies</div>
               </div>
             </div>
@@ -197,9 +199,7 @@ export default function LibraryPage() {
                 <X className="w-5 h-5" />
               </button>
             )}
-            {searchLoading && (
-              <div className="library-search__spinner" />
-            )}
+            {searchLoading && <div className="library-search__spinner" />}
           </div>
         </div>
       </div>
@@ -236,7 +236,7 @@ export default function LibraryPage() {
               Low Risk
             </button>
           </div>
-          
+
           {activeFilterCount > 0 && (
             <button onClick={clearFilters} className="library-filters__clear">
               <X className="w-4 h-4" />
@@ -262,6 +262,18 @@ export default function LibraryPage() {
                 <div className="library-skeleton__footer" />
               </div>
             ))}
+          </div>
+        ) : error ? (
+          <div className="library-empty">
+            <div className="library-empty__card">
+              <AlertTriangle className="library-empty__icon" />
+              <h3 className="library-empty__title">Couldn&rsquo;t load the library</h3>
+              <p className="library-empty__text">{error}</p>
+              <button onClick={() => fetchLibrary()} className="library-empty__button">
+                <RefreshCw className="w-5 h-5" />
+                Try again
+              </button>
+            </div>
           </div>
         ) : analyses.length === 0 ? (
           <div className="library-empty">

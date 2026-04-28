@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Eye, FileText, ArrowUpRight, Shield, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Eye, FileText, ArrowUpRight, Shield, AlertTriangle, ShieldAlert, Clock, History } from 'lucide-react';
 import type { RiskLevel, CategoryName } from '@/lib/types';
+import { getRiskGrade } from '@/lib/utils';
 
 interface TOSCardProps {
   analysis: {
@@ -16,7 +17,24 @@ interface TOSCardProps {
     categories: CategoryName[];
     createdAt: string;
     score: number;
+    isSuperseded?: boolean;
+    latestId?: string | null;
   };
+}
+
+const STALE_MONTHS = 6;
+const VERY_STALE_MONTHS = 12;
+const MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30;
+
+function getAgeBadge(createdAt: string): { label: string; className: string } | null {
+  const ageMonths = (Date.now() - new Date(createdAt).getTime()) / MS_PER_MONTH;
+  if (ageMonths >= VERY_STALE_MONTHS) {
+    return { label: `${Math.floor(ageMonths)} months old`, className: 'tos-card__age tos-card__age--very-stale' };
+  }
+  if (ageMonths >= STALE_MONTHS) {
+    return { label: `${Math.floor(ageMonths)} months old`, className: 'tos-card__age tos-card__age--stale' };
+  }
+  return null;
 }
 
 const KNOWN_DOMAINS: Record<string, string> = {
@@ -87,11 +105,8 @@ export const TOSCard = ({ analysis }: TOSCardProps) => {
   };
 
   const getScoreGrade = (score: number): { letter: string; class: string } => {
-    if (score <= 20) return { letter: 'A', class: 'tos-card__grade--a' };
-    if (score <= 40) return { letter: 'B', class: 'tos-card__grade--b' };
-    if (score <= 60) return { letter: 'C', class: 'tos-card__grade--c' };
-    if (score <= 80) return { letter: 'D', class: 'tos-card__grade--d' };
-    return { letter: 'F', class: 'tos-card__grade--f' };
+    const letter = getRiskGrade(score);
+    return { letter, class: `tos-card__grade--${letter.toLowerCase()}` };
   };
 
   const getRiskConfig = (risk: RiskLevel) => {
@@ -182,6 +197,8 @@ export const TOSCard = ({ analysis }: TOSCardProps) => {
   const RiskIcon = riskConfig.icon;
   const domain = getCompanyDomain(analysis.companyName);
   const logoUrl = domain ? `https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${domain}&size=128` : null;
+  const ageBadge = getAgeBadge(analysis.createdAt);
+  const isSuperseded = !!analysis.isSuperseded;
 
   return (
     <Link href={`/analysis/${analysis.id}`} className="block h-full">
@@ -190,11 +207,14 @@ export const TOSCard = ({ analysis }: TOSCardProps) => {
         
         <div className="tos-card__content">
           <div className="flex items-start justify-between gap-3 mb-4">
-            <div className={`tos-card__badge ${riskConfig.badgeClass}`}>
-              <RiskIcon className="w-3.5 h-3.5" />
-              <span>{riskConfig.label}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className={`tos-card__badge ${riskConfig.badgeClass}`}>
+                <RiskIcon className="w-3.5 h-3.5" />
+                <span>{riskConfig.label}</span>
+              </div>
+              <span className="tos-card__ai-tag" title="AI-generated analysis — verify against the original document">AI</span>
             </div>
-            
+
             <div className="text-right">
               <div className={`tos-card__grade ${scoreGrade.class}`}>
                 {scoreGrade.letter}
@@ -234,6 +254,23 @@ export const TOSCard = ({ analysis }: TOSCardProps) => {
           </div>
 
           <div className="mt-auto">
+            {(ageBadge || isSuperseded) && (
+              <div className="tos-card__warnings">
+                {ageBadge && (
+                  <span className={ageBadge.className}>
+                    <Clock className="w-3 h-3" />
+                    {ageBadge.label}
+                  </span>
+                )}
+                {isSuperseded && (
+                  <span className="tos-card__age tos-card__age--superseded">
+                    <History className="w-3 h-3" />
+                    Superseded
+                  </span>
+                )}
+              </div>
+            )}
+
             {analysis.categories.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
                 {analysis.categories.slice(0, 2).map((category, idx) => (

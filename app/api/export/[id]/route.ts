@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { checkReadRateLimit } from '@/lib/redis';
-import { formatError, generateSessionHash, getClientIP } from '@/lib/utils';
+import { formatError, generateSessionHash, getClientIP, rateLimitKey, logErrorSafely } from '@/lib/utils';
 
 export async function GET(
   request: NextRequest,
@@ -19,7 +19,7 @@ export async function GET(
   try {
     // Rate limit read endpoints (30/min per IP)
     const clientIP = getClientIP(request.headers);
-    if (await checkReadRateLimit(clientIP)) {
+    if (await checkReadRateLimit(rateLimitKey(clientIP))) {
       return NextResponse.json(
         formatError('Rate limit exceeded. Please try again later.', 'RATE_LIMIT_EXCEEDED'),
         { status: 429 }
@@ -88,11 +88,11 @@ export async function GET(
     });
 
   } catch (error) {
-    console.error('Export error:', error);
-
+    logErrorSafely('export.GET', error);
+    const isDev = process.env.NODE_ENV === 'development';
     return NextResponse.json(
       formatError(
-        error instanceof Error && process.env.NODE_ENV !== 'production' ? error.message : 'Internal server error',
+        isDev && error instanceof Error ? error.message : 'Internal server error',
         'EXPORT_ERROR'
       ),
       { status: 500 }

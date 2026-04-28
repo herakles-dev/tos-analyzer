@@ -113,8 +113,22 @@ export default function HomePage() {
 
       const companyName = result.data.detected_company?.name || 'Unknown Company';
       const confidence = result.data.detected_company?.confidence || 'low';
-      
-      if (result.data.is_public) {
+      const contentWarning = result.data.content_warning;
+
+      if (contentWarning) {
+        // Document was processed but is incomplete (intro page, stub, etc.)
+        // Show a warning toast — user gets routed to analysis page with banner.
+        toast(contentWarning.message || 'Document appears incomplete', {
+          id: 'analyze',
+          icon: '⚠️',
+          duration: 8000,
+          style: {
+            background: '#3a2410',
+            color: '#fbbf24',
+            border: '1px solid #92400e',
+          },
+        });
+      } else if (result.data.is_public) {
         toast.success(`Analysis complete! Published as "${companyName}" (${confidence} confidence)`, { id: 'analyze' });
       } else {
         toast.success(`Analysis complete! Company detected: ${companyName}`, { id: 'analyze' });
@@ -123,9 +137,9 @@ export default function HomePage() {
       router.push(`/analysis/${result.data.id}`);
     } catch (error: any) {
       clearInterval(progressInterval);
-      
-      if (error.message.includes("doesn't appear to be")) {
-        toast.error(error.message, { id: 'analyze', duration: 6000 });
+
+      if (error.message.includes("doesn't appear to be") || error.message.includes('introductory')) {
+        toast.error(error.message, { id: 'analyze', duration: 8000 });
       } else {
         toast.error(error.message || 'Analysis failed. Please try again.', { id: 'analyze' });
       }

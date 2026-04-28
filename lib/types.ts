@@ -37,9 +37,24 @@ export interface AnalysisSummary {
   key_takeaways: string[];
 }
 
+export interface DocumentValidation {
+  is_legal_document: boolean;
+  document_type: 'tos' | 'privacy_policy' | 'eula' | 'service_agreement' | 'cookie_policy' | 'unknown' | 'not_legal';
+  confidence: number;
+  rejection_reason?: string | null;
+  is_complete_document?: boolean;
+  content_issues?: string[];
+}
+
 export interface AnalysisResult {
   summary: AnalysisSummary;
   categories: Category[];
+  document_validation?: DocumentValidation;
+  detected_company?: {
+    name: string;
+    confidence: 'high' | 'medium' | 'low';
+    source: string;
+  };
   metadata?: {
     analyzed_at?: string;
     model?: string;

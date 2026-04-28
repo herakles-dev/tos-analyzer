@@ -14,20 +14,31 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import pdf from 'pdf-parse';
-import { formatError, sanitizeFilename, getClientIP } from '@/lib/utils';
-import { checkRateLimit, getRateLimitInfo } from '@/lib/redis';
+import { formatError, sanitizeFilename, getClientIP, rateLimitKey, logErrorSafely } from '@/lib/utils';
+import { checkUploadRateLimit, getRateLimitInfo, CACHE_KEYS } from '@/lib/redis';
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+// Aligned with nginx client_max_body_size (5MB). Was 10MB → cosmetic mismatch
+// with nginx; nginx 413s first anyway, but keep the app honest.
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = ['application/pdf'];
+
+// Hard caps for pdf-parse. A bombed PDF can stall the parser for minutes
+// or claim millions of pages; bound both axes.
+const MAX_PDF_PAGES = 500;
+const PDF_PARSE_TIMEOUT_MS = 30_000;
 
 export async function POST(request: NextRequest) {
   let tempFilePath: string | null = null;
 
   try {
-    // Rate limiting
+    // Rate limiting — keyed on rateLimitKey() so IPv6 attackers can't rotate
+    // within their /64 prefix to bypass per-IP caps. Cap is 3/min to match
+    // nginx. Uses its OWN Redis key namespace so 3 uploads don't eat into
+    // the user's 10/min analyze quota.
     const clientIP = getClientIP(request.headers);
-    const rateLimitExceeded = await checkRateLimit(clientIP, 10);
-    const rateLimitInfo = await getRateLimitInfo(clientIP, 10);
+    const rlKey = rateLimitKey(clientIP);
+    const rateLimitExceeded = await checkUploadRateLimit(rlKey, 3);
+    const rateLimitInfo = await getRateLimitInfo(rlKey, 3, CACHE_KEYS.RATE_LIMIT_UPLOAD);
     const rateLimitHeaders = {
       'X-RateLimit-Limit': rateLimitInfo.limit.toString(),
       'X-RateLimit-Remaining': rateLimitInfo.remaining.toString(),
@@ -92,9 +103,32 @@ export async function POST(request: NextRequest) {
 
     await writeFile(tempFilePath, buffer);
 
-    // Extract text from PDF
-    console.log('Extracting text from PDF...');
-    const data = await pdf(buffer);
+    // Extract text from PDF, with hard time + page caps.
+    // pdf-parse runs in-process and lacks worker isolation; a malformed PDF
+    // can OOM the Node process or stall the event loop for minutes. The
+    // `max` option caps page parsing; the timeout race kills runaway parses.
+    // Cast: the bundled @types/pdf-parse in Docker resolves to a 1-arg
+    // signature even though the published types accept Options. Runtime
+    // accepts (buffer, options) — verified in pdf-parse 1.1.4 source.
+    const parsePromise: ReturnType<typeof pdf> = (pdf as any)(buffer, { max: MAX_PDF_PAGES });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('PDF parse timed out — file may be malformed or oversized')),
+        PDF_PARSE_TIMEOUT_MS
+      )
+    );
+    const data = await Promise.race([parsePromise, timeoutPromise]);
+
+    if (data.numpages > MAX_PDF_PAGES) {
+      return NextResponse.json(
+        formatError(
+          `PDF has too many pages (${data.numpages}). Maximum ${MAX_PDF_PAGES} pages.`,
+          'PDF_TOO_MANY_PAGES'
+        ),
+        { status: 400, headers: rateLimitHeaders }
+      );
+    }
+
     const extractedText = data.text;
 
     // Clean up temporary file
@@ -112,13 +146,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`Extracted ${extractedText.length} characters from PDF`);
-
+    // Don't echo back the user-supplied filename — use the sanitized form,
+    // since file.name can contain control chars / unicode tricks.
     return NextResponse.json({
       success: true,
       data: {
         text: extractedText,
-        filename: file.name,
+        filename: sanitized,
         size: file.size,
         pages: data.numpages,
         word_count: extractedText.trim().split(/\s+/).length,
@@ -126,20 +160,21 @@ export async function POST(request: NextRequest) {
     }, { headers: rateLimitHeaders });
 
   } catch (error) {
-    console.error('PDF upload error:', error);
+    logErrorSafely('upload.POST', error, { endpoint: '/api/upload' });
 
     // Clean up temporary file if it exists
     if (tempFilePath) {
       try {
         await unlink(tempFilePath);
       } catch (unlinkError) {
-        console.error('Failed to clean up temp file:', unlinkError);
+        logErrorSafely('upload.POST.cleanup', unlinkError);
       }
     }
 
+    const isDev = process.env.NODE_ENV === 'development';
     return NextResponse.json(
       formatError(
-        error instanceof Error && process.env.NODE_ENV !== 'production' ? error.message : 'Internal server error',
+        isDev && error instanceof Error ? error.message : 'Internal server error',
         'UPLOAD_ERROR'
       ),
       { status: 500 }
