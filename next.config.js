@@ -2,7 +2,26 @@
 const nextConfig = {
   output: 'standalone',
   poweredByHeader: false,
-  
+
+  // pdf-parse runs in a worker_threads worker (see app/api/upload/route.ts).
+  // The worker uses `require('pdf-parse')` from inside a template-string
+  // source, so:
+  //   (1) `serverComponentsExternalPackages` keeps Next from bundling it.
+  //   (2) `outputFileTracingIncludes` explicitly copies it into the
+  //       standalone output, since the trace can't see require() inside a
+  //       template string.
+  experimental: {
+    serverComponentsExternalPackages: ['pdf-parse'],
+    outputFileTracingIncludes: {
+      // pdf-parse's only dep is node-ensure; both must be present at runtime
+      // because the trace can't see require() inside the worker template.
+      '/api/upload': [
+        './node_modules/pdf-parse/**/*',
+        './node_modules/node-ensure/**/*',
+      ],
+    },
+  },
+
   images: {
     remotePatterns: [
       {

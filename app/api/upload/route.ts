@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import pdf from 'pdf-parse';
+import { Worker } from 'worker_threads';
 import { formatError, sanitizeFilename, getClientIP, rateLimitKey, logErrorSafely } from '@/lib/utils';
 import { checkUploadRateLimit, getRateLimitInfo, CACHE_KEYS } from '@/lib/redis';
 
@@ -26,6 +26,71 @@ const ALLOWED_MIME_TYPES = ['application/pdf'];
 // or claim millions of pages; bound both axes.
 const MAX_PDF_PAGES = 500;
 const PDF_PARSE_TIMEOUT_MS = 30_000;
+
+// Worker source: parses the PDF in an isolated thread so a CPU-bound or
+// memory-leaky pdf-parse run can't block the main event loop or OOM the
+// whole process. On timeout the parent calls worker.terminate(), which is
+// a hard kill regardless of what the worker is doing internally.
+//
+// Embedded as `eval: true` rather than a separate file so Next.js standalone
+// bundling stays simple — the worker still resolves pdf-parse via the
+// runtime node_modules tree.
+const PDF_WORKER_SOURCE = `
+  const { parentPort, workerData } = require('worker_threads');
+  const pdf = require('pdf-parse');
+  (async () => {
+    try {
+      const data = await pdf(workerData.buffer, { max: workerData.max });
+      parentPort.postMessage({ ok: true, text: data.text, numpages: data.numpages });
+    } catch (err) {
+      parentPort.postMessage({ ok: false, error: (err && err.message) ? err.message : String(err) });
+    }
+  })();
+`;
+
+interface PdfParseResult {
+  text: string;
+  numpages: number;
+}
+
+function parsePdfInWorker(buffer: Buffer, max: number, timeoutMs: number): Promise<PdfParseResult> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(PDF_WORKER_SOURCE, {
+      eval: true,
+      workerData: { buffer, max },
+    });
+
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate().catch(() => {}).finally(fn);
+    };
+
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error('PDF parse timed out — file may be malformed or oversized')));
+    }, timeoutMs);
+
+    worker.on('message', (msg: { ok: boolean; text?: string; numpages?: number; error?: string }) => {
+      clearTimeout(timer);
+      if (msg.ok && typeof msg.text === 'string' && typeof msg.numpages === 'number') {
+        finish(() => resolve({ text: msg.text!, numpages: msg.numpages! }));
+      } else {
+        finish(() => reject(new Error(msg.error || 'PDF parse failed in worker')));
+      }
+    });
+    worker.on('error', (err) => {
+      clearTimeout(timer);
+      finish(() => reject(err));
+    });
+    worker.on('exit', (code) => {
+      if (!settled && code !== 0) {
+        clearTimeout(timer);
+        finish(() => reject(new Error(`PDF parse worker exited with code ${code}`)));
+      }
+    });
+  });
+}
 
 export async function POST(request: NextRequest) {
   let tempFilePath: string | null = null;
@@ -103,21 +168,10 @@ export async function POST(request: NextRequest) {
 
     await writeFile(tempFilePath, buffer);
 
-    // Extract text from PDF, with hard time + page caps.
-    // pdf-parse runs in-process and lacks worker isolation; a malformed PDF
-    // can OOM the Node process or stall the event loop for minutes. The
-    // `max` option caps page parsing; the timeout race kills runaway parses.
-    // Cast: the bundled @types/pdf-parse in Docker resolves to a 1-arg
-    // signature even though the published types accept Options. Runtime
-    // accepts (buffer, options) — verified in pdf-parse 1.1.4 source.
-    const parsePromise: ReturnType<typeof pdf> = (pdf as any)(buffer, { max: MAX_PDF_PAGES });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error('PDF parse timed out — file may be malformed or oversized')),
-        PDF_PARSE_TIMEOUT_MS
-      )
-    );
-    const data = await Promise.race([parsePromise, timeoutPromise]);
+    // Extract text in an isolated worker thread. Page cap + wall-clock timeout
+    // both enforced; on timeout the worker is hard-terminated so a CPU-bound
+    // pdf-parse loop can't pin the main event loop.
+    const data = await parsePdfInWorker(buffer, MAX_PDF_PAGES, PDF_PARSE_TIMEOUT_MS);
 
     if (data.numpages > MAX_PDF_PAGES) {
       return NextResponse.json(
