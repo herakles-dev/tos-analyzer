@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { Eye, FileText, ArrowUpRight, Shield, AlertTriangle, ShieldAlert, Clock, History } from 'lucide-react';
 import type { RiskLevel, CategoryName } from '@/lib/types';
 import { getRiskGrade } from '@/lib/utils';
+import { getCompanyDomain, getInitials } from '@/lib/company-display';
 
 interface TOSCardProps {
   analysis: {
@@ -36,65 +37,6 @@ function getAgeBadge(createdAt: string): { label: string; className: string } | 
   }
   return null;
 }
-
-const KNOWN_DOMAINS: Record<string, string> = {
-  'google': 'google.com',
-  'facebook': 'facebook.com',
-  'meta': 'meta.com',
-  'amazon': 'amazon.com',
-  'apple': 'apple.com',
-  'microsoft': 'microsoft.com',
-  'netflix': 'netflix.com',
-  'spotify': 'spotify.com',
-  'twitter': 'twitter.com',
-  'x': 'x.com',
-  'linkedin': 'linkedin.com',
-  'instagram': 'instagram.com',
-  'whatsapp': 'whatsapp.com',
-  'tiktok': 'tiktok.com',
-  'snapchat': 'snapchat.com',
-  'discord': 'discord.com',
-  'slack': 'slack.com',
-  'zoom': 'zoom.com',
-  'zoom communications': 'zoom.com',
-  'dropbox': 'dropbox.com',
-  'adobe': 'adobe.com',
-  'salesforce': 'salesforce.com',
-  'shopify': 'shopify.com',
-  'stripe': 'stripe.com',
-  'paypal': 'paypal.com',
-  'uber': 'uber.com',
-  'airbnb': 'airbnb.com',
-  'reddit': 'reddit.com',
-  'pinterest': 'pinterest.com',
-  'twitch': 'twitch.tv',
-  'github': 'github.com',
-  'gitlab': 'gitlab.com',
-  'atlassian': 'atlassian.com',
-  'jira': 'atlassian.com',
-  'notion': 'notion.so',
-  'figma': 'figma.com',
-  'canva': 'canva.com',
-  'openai': 'openai.com',
-  'anthropic': 'anthropic.com',
-  'oracle': 'oracle.com',
-  'ibm': 'ibm.com',
-  'samsung': 'samsung.com',
-  'sony': 'sony.com',
-  'nintendo': 'nintendo.com',
-  'steam': 'steampowered.com',
-  'valve': 'valvesoftware.com',
-  'epic': 'epicgames.com',
-  'walmart': 'walmart.com',
-  'target': 'target.com',
-  'ebay': 'ebay.com',
-  'etsy': 'etsy.com',
-  'doordash': 'doordash.com',
-  'grubhub': 'grubhub.com',
-  'lyft': 'lyft.com',
-  'jibe': 'jibe.com',
-  'jibe mobile': 'jibe.com',
-};
 
 export const TOSCard = ({ analysis }: TOSCardProps) => {
   const [logoError, setLogoError] = useState(false);
@@ -139,41 +81,6 @@ export const TOSCard = ({ analysis }: TOSCardProps) => {
           gradientClass: 'tos-card__gradient--low',
         };
     }
-  };
-
-  const getCompanyDomain = (name: string | null): string | null => {
-    if (!name) return null;
-    const normalized = name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    const firstWord = normalized.split(' ')[0];
-    
-    if (KNOWN_DOMAINS[normalized]) {
-      return KNOWN_DOMAINS[normalized];
-    }
-    
-    if (KNOWN_DOMAINS[firstWord]) {
-      return KNOWN_DOMAINS[firstWord];
-    }
-    
-    for (const [key, domain] of Object.entries(KNOWN_DOMAINS)) {
-      if (normalized.startsWith(key) || key === firstWord) {
-        return domain;
-      }
-    }
-    
-    if (firstWord.length > 2) {
-      return `${firstWord}.com`;
-    }
-    
-    return null;
-  };
-
-  const getInitials = (name: string | null): string => {
-    if (!name) return '?';
-    const words = name.split(' ').filter(w => w.length > 0);
-    if (words.length >= 2) {
-      return (words[0][0] + words[1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
   };
 
   const getInitialsBgColor = (name: string | null): string => {
