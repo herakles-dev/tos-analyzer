@@ -87,9 +87,33 @@ export async function GET(
     // to inflate viewCount + popularityScore and game the library "Popular"
     // sort. checkReadRateLimit (30/min) limits the burst rate, but doesn't
     // stop a slow-roll over hours.
+    //
+    // Defense-in-depth: AND a Redis debounce (fast, fails open) with a DB
+    // lookup against AnalyticsEvent (slow, fails closed). A Redis outage
+    // would otherwise let popularity inflation through.
     const userAgent = request.headers.get('user-agent') || 'unknown';
     const sessionHash = generateSessionHash(clientIP, userAgent);
-    const isFirstViewToday = await debounceAction('view', sessionHash, id, 24 * 60 * 60);
+    const redisFirstView = await debounceAction('view', sessionHash, id, 24 * 60 * 60);
+
+    let dbFirstView = true;
+    try {
+      const recent = await prisma.analyticsEvent.findFirst({
+        where: {
+          analysisId: id,
+          sessionHash,
+          eventType: 'share_viewed',
+          timestamp: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      dbFirstView = !recent;
+    } catch (error) {
+      // DB hiccup on the lookup shouldn't 500 the page — accept the Redis
+      // verdict alone in that case.
+      logErrorSafely('view-debounce DB check', error);
+    }
+
+    const isFirstViewToday = redisFirstView && dbFirstView;
 
     let share = analysis.shares[0];
     if (!share) {
