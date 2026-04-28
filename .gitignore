@@ -45,3 +45,10 @@ CLAUDE.md
 # Build info
 tsconfig.tsbuildinfo
 *.bak
+
+# Claude Code (machine-specific hook paths)
+.claude/
+
+# CLI run state
+cli/seed-library/state.json
+cli/seed-library/logs/

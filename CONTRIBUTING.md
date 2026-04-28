@@ -6,7 +6,7 @@ Thanks for your interest in contributing.
 
 ```bash
 # Clone
-git clone https://github.com/HeraclesBass/tos-analyzer.git
+git clone https://github.com/herakles-dev/tos-analyzer.git
 cd tos-analyzer
 
 # Install dependencies
