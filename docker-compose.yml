@@ -6,26 +6,16 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
-    environment:
-      - NODE_ENV=production
-      - PORT=${PORT:-3000}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DAILY_TOKEN_BUDGET=${DAILY_TOKEN_BUDGET:-5000000}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
-      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
-      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
-      - SESSION_SALT=${SESSION_SALT}
+      - "127.0.0.1:8101:8101"
+    env_file: .env
     depends_on:
       - postgres
       - redis
     restart: always
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:${PORT:-3000}/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8101/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
-      timeout: 3s
+      timeout: 10s
       retries: 3
       start_period: 40s
 
